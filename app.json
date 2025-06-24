@@ -15,6 +15,15 @@
       ]
     ],
     "name": "my-app",
-    "slug": "my-app"
+    "slug": "gesto-warehouse-requests",
+    "extra": {
+      "router": {
+        "origin": "https://n"
+      },
+      "eas": {
+        "projectId": "01012fc5-8e7e-4a5d-9123-83bee84b8fc3"
+      }
+    },
+    "owner": "fortunecode"
   }
 }
