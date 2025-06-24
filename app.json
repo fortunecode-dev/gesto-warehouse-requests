@@ -3,19 +3,9 @@
     "scheme": "acme",
     "userInterfaceStyle": "automatic",
     "orientation": "default",
-    "web": {
-      "output": "static"
-    },
-    "plugins": [
-      [
-        "expo-router",
-        {
-          "origin": "https://n"
-        }
-      ]
-    ],
-    "name": "my-app",
+    "name": "gesto-warehouse-requests",
     "slug": "gesto-warehouse-requests",
+    "owner": "fortunecode",
     "extra": {
       "router": {
         "origin": "https://n"
@@ -24,6 +14,21 @@
         "projectId": "01012fc5-8e7e-4a5d-9123-83bee84b8fc3"
       }
     },
-    "owner": "fortunecode"
+    "android": {
+      "package": "com.fortunecode.gesto",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#FFFFFF"
+      }
+    },
+    "plugins": [
+      [
+        "expo-router",
+        {
+          "origin": "https://n"
+        }
+      ]
+    ]
   }
 }
