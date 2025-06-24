@@ -11,490 +11,335 @@ import {
   Dimensions,
   Platform,
   TouchableWithoutFeedback,
-  ScrollView,
+  ActivityIndicator,
   Pressable,
-  ActivityIndicator
+  ScrollView
 } from "react-native";
 import { useTheme } from "react-native-paper";
 import { MaterialIcons } from '@expo/vector-icons';
 import { getProducts, getProductsSaved, syncProducts } from "@/services/pedidos.service";
-import axios from "axios";
 import { useFocusEffect } from "expo-router";
 
-interface Producto {
-  id: string;
-  name: string;
-  unitOfMeasureId: string;
-  cantidad: string;
-  stock?: number;
-}
-
-interface ProductoAgregado extends Producto {
-  key: string;
-  fechaAgregado: number;
-}
-
-type Orden = 'alfabetico' | 'insercion';
-
-const { width, height } = Dimensions.get('window');
-const isSmallDevice = width < 375;
-
+const { width: screenWidth } = Dimensions.get('window');
+const isSmallDevice = screenWidth < 375;
+const leftWidth = screenWidth * 0.4;   // 40%
+const middleWidth = screenWidth * 0.3; // 30%
+const rightWidth = screenWidth * 0.3;  // 30%
+const itemHeight = isSmallDevice ? 40 : 50; // Altura reducida de elementos
+const standar={"mass":"kg","units":"u","volume":"mL","distance":"cm"}
 export default function Basket({ title, url }) {
   const { colors } = useTheme();
   const [selectedCategoria, setSelectedCategoria] = useState('');
-  const [productosAgregados, setProductosAgregados] = useState<ProductoAgregado[]>([]);
+  const [productosAgregados, setProductosAgregados] = useState([]);
   const [modalVisible, setModalVisible] = useState(false);
-  const [productoEditando, setProductoEditando] = useState<ProductoAgregado | null>(null);
-  const [nuevaCantidad, setNuevaCantidad] = useState('1');
-  const [orden, setOrden] = useState<Orden>('insercion');
+  const [productoEditando, setProductoEditando] = useState(null);
+  const [nuevaCantidad, setNuevaCantidad] = useState('');
+  const [categorias, setCategorias] = useState([]);
+  const [productos, setProductos] = useState({});
+  const [placeholderValue, setPlaceholderValue] = useState('');
   const [indiceProductoActual, setIndiceProductoActual] = useState(0);
   const [isLastProduct, setIsLastProduct] = useState(false);
-  const [categorias, setCategorias] = useState<any>([]);
-  const [productos, setProductos] = useState<any>({});
-  const [syncStatus, setSyncStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
-  const [orientation, setOrientation] = useState<'portrait' | 'landscape'>(
-    height > width ? 'portrait' : 'landscape'
-  );
-  const [placeholderValue, setPlaceholderValue] = useState('');
-  
-  
-  // Cargar productos iniciales
-   useFocusEffect(useCallback(() => {
-       load();
-    }, []));
+  const [syncStatus, setSyncStatus] = useState('idle');
 
+  useFocusEffect(useCallback(() => { load(); }, []));
 
   const load = async () => {
     try {
-      const [productos, categorias] = await getProducts(url);
-      setCategorias(categorias);
-      setProductos(productos);
-
-      // Cargar productos agregados desde el backend
-      const response = await getProductsSaved(url)
-      if (response && Array.isArray(response)) {
-        setProductosAgregados(response.map(p => ({
+      const [productosRes, categoriasRes] = await getProducts(url);
+      setCategorias(categoriasRes);
+      setProductos(productosRes);
+      const saved = await getProductsSaved(url);
+      if (Array.isArray(saved)) {
+        setProductosAgregados(saved.map(p => ({
           ...p,
-          key: `${p.id}-${Date.now()}`,
+          id:p.productId,
+          key: `${p.id||p.productId}-${Date.now()}`,
           fechaAgregado: p.fechaAgregado || Date.now()
         })));
       }
-    } catch (error) {
-      console.error("Error al cargar productos:", error);
+    } catch (e) {
+      console.error(e);
+      setSyncStatus('error');
     }
   };
 
-  // Sincronizar productos con el backend
+  const syncData = async () => {
+    try {
+      setSyncStatus('loading');
+      await syncProducts(url, productosAgregados);
+      setSyncStatus('success');
+    } catch (error) {
+      console.error("Sync error:", error);
+      setSyncStatus('error');
+    }
+  };
+
   useEffect(() => {
-    let timer: NodeJS.Timeout;
-    let successTimer: NodeJS.Timeout;
+    const timer = setTimeout(syncData, 1000);
+    return () => clearTimeout(timer);
+  }, [productosAgregados]);
 
-    const syncWithBackend = async () => {
-      try {
-        setSyncStatus('loading');
-        await syncProducts(url, productosAgregados);
-        setSyncStatus('success');
-      } catch (error) {
-        console.error("Error al sincronizar productos:", error);
-        setSyncStatus('error');
-        timer = setTimeout(syncWithBackend, 5000);
-      }
-    };
-
-    timer = setTimeout(syncWithBackend, 1500);
-
-    return () => {
-      clearTimeout(timer);
-      clearTimeout(successTimer);
-    };
-  }, [productosAgregados, url]);
-
-  const abrirModalEdicion = (producto: ProductoAgregado) => {
+  const abrirModalEdicion = (producto) => {
     const indice = productosAgregados.findIndex(p => p.key === producto.key);
     setIndiceProductoActual(indice);
     setProductoEditando(producto);
-    
-    // Modificación para el placeholder en modo checkout
-    if (url === 'checkout') {
-      const stockText = producto.stock !== undefined ? `Stock: ${producto.stock}` : '';
-      setPlaceholderValue(`Pedido: ${producto.cantidad} ${stockText}`);
-    } else {
-      setPlaceholderValue(producto.cantidad);
-    }
-    
+    setPlaceholderValue(producto.cantidad.toString());
     setNuevaCantidad('');
     setModalVisible(true);
   };
 
   const guardarEdicion = () => {
     if (!productoEditando) return;
-
-    const cantidadFinal = nuevaCantidad === '' ? placeholderValue : nuevaCantidad;
-    const productosActualizados = productosAgregados.map(p =>
+    const cantidadFinal = nuevaCantidad || placeholderValue;
+    const actualizados = productosAgregados.map(p =>
       p.key === productoEditando.key ? { ...p, cantidad: cantidadFinal } : p
     );
-
-    setProductosAgregados(productosActualizados);
-    setPlaceholderValue(cantidadFinal);
-    setNuevaCantidad('');
-    return productosActualizados;
-  };
-
-  const handleSubmitEditing = () => {
-    const productosActualizados = guardarEdicion();
-
-    if (!isLastProduct && productosActualizados) {
-      const siguienteIndice = indiceProductoActual + 1;
-      const siguienteProducto = productosActualizados[siguienteIndice];
-      setIndiceProductoActual(siguienteIndice);
-      setProductoEditando(siguienteProducto);
-      
-      // Modificación para el placeholder en modo checkout
-      if (url === 'checkout') {
-        const stockText = siguienteProducto.stock !== undefined ? `Stock: ${siguienteProducto.stock}` : '';
-        setPlaceholderValue(`Pedido: ${siguienteProducto.cantidad} ${stockText}`);
-      } else {
-        setPlaceholderValue(siguienteProducto.cantidad);
-      }
-      
-      setNuevaCantidad('');
-    } else {
-      setModalVisible(false);
-    }
+    setProductosAgregados(actualizados);
+    return actualizados;
   };
 
   const siguienteProducto = () => {
-    const productosActualizados = guardarEdicion();
-    if (!productosActualizados || !productoEditando) return;
+    const actualizados = guardarEdicion();
+    if (!actualizados || !productoEditando) return;
 
     let siguienteIndice = indiceProductoActual + 1;
-    if (siguienteIndice >= productosActualizados.length) {
-      siguienteIndice = 0;
-    }
+    if (siguienteIndice >= actualizados.length) siguienteIndice = 0;
 
-    const siguienteProducto = productosActualizados[siguienteIndice];
+    const siguiente = actualizados[siguienteIndice];
     setIndiceProductoActual(siguienteIndice);
-    setProductoEditando(siguienteProducto);
-    
-    // Modificación para el placeholder en modo checkout
-    if (url === 'checkout') {
-      const stockText = siguienteProducto.stock !== undefined ? `Stock: ${siguienteProducto.stock}` : '';
-      setPlaceholderValue(`Pedido: ${siguienteProducto.cantidad} ${stockText}`);
-    } else {
-      setPlaceholderValue(siguienteProducto.cantidad);
-    }
-    
+    setProductoEditando(siguiente);
+    setPlaceholderValue(siguiente.cantidad);
     setNuevaCantidad('');
   };
 
-  useEffect(() => {
-    const updateOrientation = () => {
-      const { width, height } = Dimensions.get('window');
-      setOrientation(height > width ? 'portrait' : 'landscape');
-    };
+  const agregarProducto = (id) => {
+    const existe = productosAgregados.find(p => p.id === id);
+    if (existe) {
+      const actualizados = productosAgregados.map(p =>
+        p.id === id ? { ...p, cantidad: String(parseFloat(p.cantidad) + 1) } : p
+      );
+      setProductosAgregados(actualizados);
+    } else {
+      const producto = productos[selectedCategoria].find(p => p.id === id);
+      const nuevo = {
+        ...producto,
+        cantidad: '1',
+        key: `${id}-${Date.now()}`,
+        fechaAgregado: Date.now()
+      };
+      setProductosAgregados(prev => [...prev, nuevo]);
+    }
+  };
 
-    Dimensions.addEventListener('change', updateOrientation);
-  }, []);
+  const eliminarProducto = (id) => {
+    setProductosAgregados(prev => prev.filter(p => p.id !== id));
+  };
+
+  const validarCantidadDecimal = (text) => {
+    if (text === '' || /^\d*\.?\d{0,2}$/.test(text)) {
+      setNuevaCantidad(text);
+    }
+  };
+
+  const renderSyncIndicator = () => {
+    let icon, color;
+    switch (syncStatus) {
+      case 'loading':
+        icon = <ActivityIndicator size="small" color="white" />;
+        color = '#3498db';
+        break;
+      case 'success':
+        icon = <MaterialIcons name="check" size={16} color="white" />;
+        color = '#2ecc71';
+        break;
+      case 'error':
+        icon = <MaterialIcons name="error" size={16} color="white" />;
+        color = '#e74c3c';
+        break;
+      default:
+        return null;
+    }
+    return (
+      <View style={[styles.syncIndicator, { backgroundColor: color }]}>
+        {icon}
+      </View>
+    );
+  };
+
+  const renderItem = ({ item }) => {
+    const cantidad = parseFloat(item.cantidad) || 0;
+    const stock = parseInt(item.stock) || 0;
+    const bgColor = item.stock !== undefined ?
+      (stock >= cantidad ? '#e8f5e9' : '#ffebee') : 'white';
+
+    return (
+      <View style={[styles.itemContainer, {
+        backgroundColor: bgColor,
+        height: itemHeight
+      }]}>
+        <Pressable
+          style={styles.itemInfo}
+          onPress={() => abrirModalEdicion(item)}
+        >
+          <Text
+            style={styles.itemText}
+            numberOfLines={1}
+            ellipsizeMode="tail"
+          >
+            {cantidad}x {item.name} ({standar[item.unitOfMeasureId]})
+          </Text>
+          {item.stock !== undefined && (
+            <Text style={styles.stockText}>
+              Stock: {stock}
+            </Text>
+          )}
+        </Pressable>
+        <TouchableOpacity
+          style={styles.deleteButton}
+          onPress={() => eliminarProducto(item.id)}
+        >
+          <MaterialIcons
+            name="delete"
+            size={isSmallDevice ? 18 : 20}
+            color="#e74c3c"
+          />
+        </TouchableOpacity>
+      </View>
+    );
+  };
 
   useEffect(() => {
     setIsLastProduct(indiceProductoActual === productosAgregados.length - 1);
   }, [indiceProductoActual, productosAgregados]);
 
-  const agregarProducto = (productoId: string) => {
-    const productoExistenteIndex = productosAgregados.findIndex(p => p.id === productoId);
-
-    if (productoExistenteIndex >= 0) {
-      const productosActualizados = [...productosAgregados];
-      const cantidadActual = parseInt(productosActualizados[productoExistenteIndex].cantidad) || 0;
-      productosActualizados[productoExistenteIndex].cantidad = (cantidadActual + 1).toString();
-      setProductosAgregados(productosActualizados);
-      setSyncStatus('loading');
-      return;
-    }
-
-    const producto = productos[selectedCategoria].find((p: any) => p.id === productoId);
-    const nuevoProducto = {
-      ...producto,
-      cantidad: '1',
-      key: `${productoId}-${Date.now()}`,
-      fechaAgregado: Date.now()
-    };
-
-    setProductosAgregados(prev => [...prev, nuevoProducto]);
-    setSyncStatus('loading');
-  };
-
-  const eliminarProducto = (key: string) => {
-    setProductosAgregados(productosAgregados.filter((p:any) => (p.id||p.productId) !== key));
-    setSyncStatus('loading');
-  };
-
-  const handleChangeText = (text: string) => {
-    if (text === '' || /^\d+$/.test(text)) {
-      setNuevaCantidad(text);
-    }
-  };
-
-  const productosOrdenados = [...productosAgregados].sort((a, b) => {
-    if (orden === 'alfabetico') {
-      return a.name.localeCompare(b.name);
-    } else {
-      return a.fechaAgregado - b.fechaAgregado;
-    }
-  });
-
-  const renderItem = ({ item }: { item: any }) => {
-    // Determinar el color de fondo basado en stock y cantidad
-    let backgroundColor = 'white';
-    if (item.stock !== undefined) {
-      const cantidad = parseInt(item.cantidad) || 0;
-      const stock = parseInt(item.stock) || 0;
-      backgroundColor = stock >= cantidad ? '#e8f5e9' : '#ffebee'; // Verde claro si hay stock, rojo claro si no
-    }
-
-    return (
-      <View style={[styles.itemContainer, { backgroundColor }]}>
-        <Pressable
-          style={styles.itemInfo}
-          onPress={() => abrirModalEdicion(item)}
-        >
-          <Text style={styles.itemName}>{item.name}</Text>
-          <Text style={styles.itemCantidad}>
-            {item.cantidad} {item.unitOfMeasureId}
-            {item.stock !== undefined && ` (Stock: ${item.stock})`}
-          </Text>
-        </Pressable>
-        <TouchableOpacity
-          style={styles.deleteButton}
-          onPress={() => eliminarProducto(item.id||item.productId)}
-        >
-          <MaterialIcons name="delete" size={isSmallDevice ? 20 : 24} color="#e74c3c" />
-        </TouchableOpacity>
-      </View>
-    );
-  };
-
-  const productoYaAgregado = (productoId: string) => {
-    return productosAgregados.some(p => p.id === productoId);
-  };
-
-  const renderSyncIndicator = () => {
-    if (syncStatus === 'idle') return null;
-
-    let indicatorColor = '#999';
-    switch (syncStatus) {
-      case 'loading':
-        indicatorColor = '#3498db';
-        break;
-      case 'success':
-        indicatorColor = '#2ecc71';
-        break;
-      case 'error':
-        indicatorColor = '#e74c3c';
-        break;
-    }
-
-    return (
-      <View style={[styles.syncIndicator, { backgroundColor: indicatorColor }]}>
-        {syncStatus === 'loading' ? (
-          <ActivityIndicator size="small" color="white" />
-        ) : syncStatus === 'error' ? (
-          <MaterialIcons name="error" size={16} color="white" />
-        ) : (
-          <MaterialIcons name="check" size={16} color="white" />
-        )}
-      </View>
-    );
-  };
-
-  const renderHeaderLeft = () => (
-    <View style={styles.headerLeft}>
-      <View style={styles.titleWrapper}>
-        <Text style={styles.sectionTitle}>{title}</Text>
-        {renderSyncIndicator()}
-      </View>
-      <View style={styles.ordenButtons}>
-        <TouchableOpacity
-          style={[styles.ordenButton, orden === 'alfabetico' && styles.ordenButtonSelected]}
-          onPress={() => setOrden(prev => prev === 'alfabetico' ? "insercion" : "alfabetico")}
-        >
-          <Text style={[styles.ordenButtonText, orden === 'alfabetico' && styles.ordenButtonTextSelected]}>
-            Ordenar
-          </Text>
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
-
   return (
     <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
       <View style={styles.container}>
-        <View style={[
-          styles.mainContainer,
-          orientation === 'landscape' && styles.landscapeContainer
-        ]}>
-          {/* Columna 1 - Tabla de productos agregados */}
-          <View style={[
-            styles.leftContainer,
-            orientation === 'landscape' && styles.landscapeLeftContainer
-          ]}>
-            {renderHeaderLeft()}
+        <View style={styles.header}>
+          <Text style={styles.title}>{title}</Text>
+          {renderSyncIndicator()}
+        </View>
 
-            {productosOrdenados.length > 0 ? (
+        <View style={styles.columnsContainer}>
+          {/* Columna izquierda - Productos agregados (40%) */}
+          <View style={[styles.column, { width: leftWidth }]}>
+            <FlatList
+              data={productosAgregados}
+              renderItem={renderItem}
+              keyExtractor={item => item.id || item.productId}
+              contentContainerStyle={styles.listContent}
+            />
+          </View>
+
+          {/* Columna central - Productos (30%) */}
+          <View style={[styles.column, { width: middleWidth }]}>
+            {selectedCategoria && (
               <FlatList
-                data={productosOrdenados}
-                renderItem={renderItem}
-                keyExtractor={item => item.id ||item.productId}
-                style={styles.listaContainer}
-                contentContainerStyle={styles.listaContent}
+                data={productos[selectedCategoria] || []}
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={styles.productoItem}
+                    onPress={() => agregarProducto(item.id)}
+                  >
+                    <Text
+                      style={styles.productoText}
+                      numberOfLines={1}
+                      ellipsizeMode="tail"
+                    >
+                      {item.name} ({standar[item.unitOfMeasureId]})
+                    </Text>
+                   
+                  </TouchableOpacity>
+                )}
+                keyExtractor={item => item.id}
+                contentContainerStyle={styles.listContent}
               />
-            ) : (
-              <Text style={styles.emptyText}>No hay productos agregados</Text>
             )}
           </View>
 
-          {/* Columna 2 - Productos */}
-          <ScrollView
-            style={[
-              styles.middleContainer,
-              orientation === 'landscape' && styles.landscapeMiddleContainer
-            ]}
-            contentContainerStyle={styles.middleContent}
-          >
-            {selectedCategoria && (
-              <View style={styles.productosContainer}>
-                <Text style={styles.sectionTitle}>Productos</Text>
-                <FlatList
-                  data={productos[selectedCategoria]}
-                  renderItem={({ item }) => (
-                    <TouchableOpacity
-                      style={[
-                        styles.productoItem,
-                        productoYaAgregado(item.id) && styles.productoItemAgregado,
-                      ]}
-                      onPress={() => agregarProducto(item.id)}
-                    >
-                      <Text style={styles.productoText}>{item.name}</Text>
-                      <Text style={styles.productounitOfMeasureId}>{item.unitOfMeasureId}</Text>
-                      {productoYaAgregado(item.id) && (
-                        <MaterialIcons
-                          name="check-circle"
-                          size={isSmallDevice ? 18 : 20}
-                          color="#2ecc71"
-                          style={styles.checkIcon}
-                        />
-                      )}
-                    </TouchableOpacity>
-                  )}
-                  keyExtractor={item => item.id}
-                  scrollEnabled={false}
-                  contentContainerStyle={styles.productosListContent}
-                />
-              </View>
-            )}
-          </ScrollView>
-
-          {/* Columna 3 - Categorías */}
-          <ScrollView
-            style={[
-              styles.rightContainer,
-              orientation === 'landscape' && styles.landscapeRightContainer
-            ]}
-            contentContainerStyle={styles.rightContent}
-          >
-            <View style={styles.categoriasContainer}>
-              <Text style={styles.sectionTitle}>Categorías</Text>
-              <View style={styles.categoriasButtons}>
-                {categorias.map((categoria) => (
-                  <TouchableOpacity
-                    key={categoria.id}
+          {/* Columna derecha - Categorías (30%) */}
+          <View style={[styles.column, { width: rightWidth }]}>
+            <ScrollView contentContainerStyle={styles.categoriasContainer}>
+              {categorias.map(c => (
+                <TouchableOpacity
+                  key={c.id}
+                  style={[
+                    styles.categoriaBtn,
+                    selectedCategoria === c.id && styles.categoriaBtnSelected
+                  ]}
+                  onPress={() => setSelectedCategoria(c.id)}
+                >
+                  <Text
                     style={[
-                      styles.categoriaButton,
-                      selectedCategoria === categoria.id && styles.categoriaButtonSelected
-                    ]}
-                    onPress={() => {
-                      setSelectedCategoria(categoria.id);
-                    }}
+                      styles.categoriaText,
+                      selectedCategoria === c.id && styles.categoriaTextSelected
+                    ]} 
+                    numberOfLines={1} // Cambiado de 1 a 2 para permitir texto más largo
                   >
-                    <Text
-                      style={[
-                        styles.categoriaButtonText,
-                        selectedCategoria === categoria.id && styles.categoriaButtonTextSelected
-                      ]}
-                    >
-                      {categoria.denomination}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-          </ScrollView>
+                    {c.denomination}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
         </View>
 
-        {/* Modal para editar cantidad */}
+        {/* Modal de edición */}
         <Modal
-          animationType="slide"
-          transparent={true}
           visible={modalVisible}
+          transparent
+          animationType="slide"
           onRequestClose={() => setModalVisible(false)}
         >
-          <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-            <View style={styles.modalContainer}>
-              <View style={[
-                styles.modalContent,
-                orientation === 'landscape' && styles.landscapeModalContent
-              ]}>
-                <Text style={styles.modalTitle}>{productoEditando?.name}</Text>
-                <Text style={styles.modalSubtitle}>Cantidad ({productoEditando?.unitOfMeasureId}):</Text>
-                <TextInput
-                  value={nuevaCantidad}
-                  onChangeText={handleChangeText}
-                  keyboardType="numeric"
-                  style={styles.modalInput}
-                  autoFocus
-                  onSubmitEditing={handleSubmitEditing}
-                  returnKeyType={isLastProduct ? "done" : "next"}
-                  blurOnSubmit={false}
-                  placeholder={placeholderValue}
-                  placeholderTextColor="#999"
-                />
-                <View style={styles.modalButtons}>
-                  <TouchableOpacity
-                    style={[styles.modalButton, { backgroundColor: '#e0e0e0' }]}
-                    onPress={() => setModalVisible(false)}
-                  >
-                    <Text style={styles.modalButtonText}>Cancelar</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[
-                      styles.modalButton,
-                      {
-                        backgroundColor: '#3498db',
-                        opacity: isLastProduct ? 0.5 : 1
-                      }
-                    ]}
-                    onPress={() => {
-                      guardarEdicion();
-                      if (!isLastProduct) {
-                        siguienteProducto();
-                      }
-                    }}
-                    disabled={isLastProduct}
-                  >
-                    <Text style={[styles.modalButtonText, { color: 'white' }]}>
-                      Siguiente
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.modalButton, { backgroundColor: colors.primary }]}
-                    onPress={guardarEdicion}
-                  >
-                    <Text style={[styles.modalButtonText, { color: 'white' }]}>Guardar</Text>
-                  </TouchableOpacity>
-                </View>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>{productoEditando?.name}</Text>
+              <Text style={styles.modalSubtitle}>
+                Cantidad ({standar[productoEditando?.unitOfMeasureId]})
+              </Text>
+              <TextInput
+                value={nuevaCantidad}
+                onChangeText={validarCantidadDecimal}
+                keyboardType="decimal-pad"
+                style={styles.modalInput}
+                placeholder={placeholderValue}
+                placeholderTextColor="#999"
+                autoFocus
+              />
+              <View style={styles.modalButtons}>
+                <TouchableOpacity
+                  style={[styles.modalBtn, styles.cancelBtn]}
+                  onPress={() => setModalVisible(false)}
+                >
+                  <Text style={styles.modalBtnText}>Cancelar</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.modalBtn,
+                    styles.nextBtn,
+                    isLastProduct && styles.disabledBtn
+                  ]}
+                  onPress={siguienteProducto}
+                  disabled={isLastProduct}
+                >
+                  <Text style={[styles.modalBtnText, styles.whiteText]}>
+                    Siguiente
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalBtn, styles.saveBtn]}
+                  onPress={() => {
+                    guardarEdicion();
+                    setModalVisible(false);
+                  }}
+                >
+                  <Text style={[styles.modalBtnText, styles.whiteText]}>
+                    Guardar
+                  </Text>
+                </TouchableOpacity>
               </View>
             </View>
-          </TouchableWithoutFeedback>
+          </View>
         </Modal>
       </View>
     </TouchableWithoutFeedback>
@@ -505,183 +350,87 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f8f9fa',
-    paddingTop: Platform.OS === 'ios' ? 50 : 20,
+    paddingTop: Platform.OS === 'ios' ? 16 : 8,
   },
-  mainContainer: {
-    flex: 1,
-    flexDirection: 'row',
-  },
-  landscapeContainer: {
-    flexDirection: 'row',
-  },
-  leftContainer: {
-    width: '40%',
-    padding: 15,
-    borderRightWidth: 1,
-    borderRightColor: '#dfe6e9',
-  },
-  landscapeLeftContainer: {
-    width: '40%',
-  },
-  middleContainer: {
-    width: '45%',
-    padding: 15,
-    borderRightWidth: 1,
-    borderRightColor: '#dfe6e9',
-  },
-  landscapeMiddleContainer: {
-    width: '45%',
-  },
-  rightContainer: {
-    width: '15%',
-    padding: 15,
-  },
-  landscapeRightContainer: {
-    width: '15%',
-  },
-  middleContent: {
-    paddingBottom: 20,
-  },
-  rightContent: {
-    paddingBottom: 20,
-  },
-  headerLeft: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 15,
-  },
-  titleWrapper: {
+  header: {
     flexDirection: 'row',
     alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#ddd',
   },
-  sectionTitle: {
+  title: {
     fontSize: 18,
-    fontWeight: '600',
+    fontWeight: 'bold',
     color: '#2c3e50',
+    marginRight: 10,
   },
   syncIndicator: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    marginLeft: 10,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  ordenButtons: {
-    flexDirection: 'row',
-    gap: 1,
-  },
-  ordenButton: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 105,
-    backgroundColor: '#e0e0e0',
-  },
-  ordenButtonSelected: {
-    backgroundColor: '#3498db',
-  },
-  ordenButtonText: {
-    fontSize: 14,
-    color: '#2c3e50',
-  },
-  ordenButtonTextSelected: {
-    color: 'white',
-  },
-  emptyText: {
-    textAlign: 'center',
-    color: '#7f8c8d',
-    marginTop: 20,
-    fontSize: 16,
-  },
-  listaContainer: {
+  columnsContainer: {
     flex: 1,
+    flexDirection: 'row',
   },
-  listaContent: {
+  column: {
+    padding: 8,
+  },
+  listContent: {
     paddingBottom: 20,
   },
   itemContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 15,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f1f2f6',
-    borderRadius: 8,
-    marginBottom: 8,
+    paddingHorizontal: 8,
+    marginBottom: 6,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#ddd',
   },
   itemInfo: {
     flex: 1,
+    paddingVertical: 6,
   },
-  itemName: {
-    fontSize: 16,
+  itemText: {
+    fontSize: isSmallDevice ? 13 : 14,
     color: '#34495e',
-    marginBottom: 4,
   },
-  itemCantidad: {
-    fontSize: 14,
+  stockText: {
+    fontSize: isSmallDevice ? 11 : 12,
     color: '#7f8c8d',
+    marginTop: 2,
   },
   deleteButton: {
-    marginLeft: 10,
-  },
-  categoriasContainer: {
-    marginBottom: 20,
-  },
-  categoriasButtons: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 5,
-  },
-  categoriaButton: {
-    paddingVertical: 8,
-    paddingHorizontal: 8,
-    borderRadius: 8,
-    backgroundColor: '#e0e0e0',
-  },
-  categoriaButtonSelected: {
-    backgroundColor: '#3498db',
-  },
-  categoriaButtonText: {
-    color: '#2c3e50',
-    fontSize: 14,
-  },
-  categoriaButtonTextSelected: {
-    color: 'white',
-  },
-  productosContainer: {
-    flex: 1,
-    marginBottom: 20,
-  },
-  productosListContent: {
-    paddingBottom: 20,
+    padding: 6,
   },
   productoItem: {
-    padding: 15,
-    backgroundColor: 'white',
-    borderRadius: 8,
-    marginBottom: 8,
+    padding: 8,
+    backgroundColor: '#fff',
+    borderRadius: 6,
+    marginBottom: 6,
     borderWidth: 1,
-    borderColor: '#dfe6e9',
-    position: 'relative',
-  },
-  productoItemAgregado: {
-    backgroundColor: '#f0fff4',
-    borderColor: '#c8e6c9',
+    borderColor: '#ddd',
+    minHeight: 40,
+    justifyContent: 'center',
   },
   productoText: {
-    fontSize: 16,
-    color: '#34495e',
+    fontSize: isSmallDevice ? 13 : 14,
+    color: '#2c3e50',
   },
-  productounitOfMeasureId: {
-    fontSize: 14,
+  productoUnit: {
+    fontSize: isSmallDevice ? 11 : 12,
     color: '#7f8c8d',
-    marginTop: 4,
   },
-  checkIcon: {
-    position: 'absolute',
-    right: 10,
-    top: 15,
+
+  categoriaBtnSelected: {
+    backgroundColor: '#3498db',
   },
+
   modalContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -689,47 +438,84 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.5)',
   },
   modalContent: {
-    width: '80%',
+    width: '90%',
     backgroundColor: 'white',
-    borderRadius: 10,
-    padding: 20,
-  },
-  landscapeModalContent: {
-    width: '60%',
+    borderRadius: 8,
+    padding: 16,
   },
   modalTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    marginBottom: 10,
+    marginBottom: 8,
     color: '#2c3e50',
   },
   modalSubtitle: {
-    fontSize: 16,
-    marginBottom: 5,
+    fontSize: 14,
     color: '#7f8c8d',
+    marginBottom: 8,
   },
   modalInput: {
     borderWidth: 1,
-    borderColor: '#dfe6e9',
-    borderRadius: 8,
+    borderColor: '#ccc',
+    borderRadius: 6,
     padding: 12,
-    marginBottom: 15,
-    backgroundColor: 'white',
+    marginBottom: 16,
     fontSize: 16,
   },
   modalButtons: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    gap: 10,
+    gap: 8,
   },
-  modalButton: {
+  modalBtn: {
     flex: 1,
-    padding: 12,
-    borderRadius: 8,
+    padding: 10,
+    borderRadius: 6,
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  modalButtonText: {
-    fontWeight: '600',
+  modalBtnText: {
     fontSize: 14,
+    fontWeight: '500',
   },
+  cancelBtn: {
+    backgroundColor: '#e0e0e0',
+  },
+  nextBtn: {
+    backgroundColor: '#3498db',
+  },
+  saveBtn: {
+    backgroundColor: '#2ecc71',
+  },
+  disabledBtn: {
+    opacity: 0.5,
+  },
+  whiteText: {
+    color: 'white',
+  },
+
+   categoriasContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  categoriaBtn: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: '#e0e0e0',
+    borderRadius: 6,
+    marginBottom: 6,
+    flexGrow:1
+  },
+  categoriaText: {
+    fontSize: isSmallDevice ? 13 : 14,
+    color: '#2c3e50',
+    textAlign: 'center',
+    flexWrap: 'wrap', // Permite que el texto se ajuste
+    flexShrink: 1, // Permite que el texto se reduzca si es necesario
+  },
+  categoriaTextSelected: {
+    color: '#fff',
+  },
+
 });
